@@ -1,7 +1,6 @@
 // Modules to control application life and create native browser window
-const {app, BrowserWindow, dialog, ipcMain, screen} = require('electron');
+const {app, BrowserWindow, dialog, ipcMain, screen, session} = require('electron');
 app.commandLine.appendSwitch("--disable-http-cache");
-
 const {Builder, By, Key, until} = require("selenium-webdriver");
 const chrome = require('selenium-webdriver/chrome');
 const {ServiceBuilder} = require('selenium-webdriver/chrome');
@@ -9,12 +8,28 @@ const {rootCertificates} = require('tls');
 const {exit} = require('process');
 const path = require('path');
 const fs = require('fs');
-const {exec} = require('child_process');
+const {exec, spawn} = require('child_process');
 const iconPath = path.join(__dirname, 'favicon.ico');
 const task_server = require(path.join(__dirname, 'server.js'));
+const util = require('util');
 
 let config = fs.readFileSync(path.join(task_server.getDir(), `config.json`), 'utf8');
 config = JSON.parse(config);
+
+if(config.debug){
+    let logPath = 'info.log'
+    let logFile = fs.createWriteStream(logPath, { flags: 'a' })
+    console.log = function() {
+        logFile.write(util.format.apply(null, arguments) + '\n')
+        process.stdout.write(util.format.apply(null, arguments) + '\n')
+    }
+    console.error = function() {
+        logFile.write(util.format.apply(null, arguments) + '\n')
+        process.stderr.write(util.format.apply(null, arguments) + '\n')
+    }
+}
+let allWindowSockets = [];
+let allWindowScoketNames = [];
 task_server.start(config.webserver_port); //start local server
 let server_address = `${config.webserver_address}:${config.webserver_port}`;
 const websocket_port = 8084; //目前只支持8084端口，写死，因为扩展里面写死了
@@ -23,6 +38,28 @@ let driverPath = "";
 let chromeBinaryPath = "";
 let execute_path = "";
 console.log(process.arch);
+
+exec(`wmic os get Caption`, function(error, stdout, stderr) {
+    if (error) {
+        console.error(`执行的错误: ${error}`);
+        return;
+    }
+
+    if (stdout.includes('Windows 7')) {
+        console.log('Windows 7');
+        let sys_arch = config.sys_arch;
+        if (sys_arch === 'x64') {
+            dialog.showMessageBoxSync({
+                type: 'error',
+                title: 'Error',
+                message: 'Windows 7系统请下载使用x32版本的软件，不论Win 7系统为x64还是x32版本。\nFor Windows 7, please download and use the x32 version of the software, regardless of whether the Win 7 system is x64 or x32 version.',
+            });
+        }
+    } else {
+        console.log('Not Windows 7');
+    }
+});
+
 if (process.platform === 'win32' && process.arch === 'ia32') {
     driverPath = path.join(__dirname, "chrome_win32/chromedriver_win32.exe");
     chromeBinaryPath = path.join(__dirname, "chrome_win32/chrome.exe");
@@ -48,6 +85,10 @@ let flowchart_window = null;
 let current_handle = null;
 let old_handles = [];
 let handle_pairs = {};
+let socket_window = null;
+let socket_start = null;
+let socket_flowchart = null;
+let invoke_window = null;
 
 // var ffi = require('ffi-napi');
 // var libm = ffi.Library('libm', {
@@ -67,7 +108,7 @@ let handle_pairs = {};
 function createWindow() {
     // Create the browser window.
     mainWindow = new BrowserWindow({
-        width: 520,
+        width: 550,
         height: 750,
         webPreferences: {
             preload: path.join(__dirname, 'src/js/preload.js')
@@ -79,7 +120,7 @@ function createWindow() {
 
     // and load the index.html of the app.
     // mainWindow.loadFile('src/index.html');
-    mainWindow.loadURL(server_address + '/index.html?user_data_folder=' + config.user_data_folder);
+    mainWindow.loadURL(server_address + '/index.html?user_data_folder=' + config.user_data_folder+"&copyright=" + config.copyright, { extraHeaders: 'pragma: no-cache\n' });
     // 隐藏菜单栏
     const {Menu} = require('electron');
     Menu.setApplicationMenu(null);
@@ -104,7 +145,7 @@ async function beginInvoke(msg, ws) {
                 url = server_address + `/taskGrid/FlowChart.html?id=${msg.message.id}&wsport=${websocket_port}&backEndAddressServiceWrapper=` + server_address;
             }
             console.log(url);
-            flowchart_window.loadURL(url);
+            flowchart_window.loadURL(url, { extraHeaders: 'pragma: no-cache\n' });
         }
         mainWindow.hide();
         // Prints the currently focused window bounds.
@@ -123,8 +164,9 @@ async function beginInvoke(msg, ws) {
         }
 
         flowchart_window.show();
+        // flowchart_window.openDevTools();
     } else if (msg.type == 2) {
-        //keyboard
+        // 键盘输入事件
         // const robot = require("@jitsi/robotjs");
         let keyInfo = msg.message.keyboardStr;
         let handles = await driver.getAllWindowHandles();
@@ -137,6 +179,12 @@ async function beginInvoke(msg, ws) {
         while (true) {
             // console.log("handles");
             try{
+                let iframe = msg.message.iframe;
+                let enter = false;
+                if (/<enter>/i.test(keyInfo)) {
+                    keyInfo = keyInfo.replace(/<enter>/gi, '');
+                    enter = true;
+                }
                 let h = order[len - 1];
                 console.log("current_handle", current_handle);
                 if(h != null && handles.includes(h)){
@@ -146,11 +194,42 @@ async function beginInvoke(msg, ws) {
                 }
                 // await driver.executeScript("window.stop();");
                 // console.log("executeScript");
-                let element = await driver.findElement(By.xpath(msg.message.xpath));
-                console.log("Find Element at handle: ", current_handle);
-                await element.sendKeys(Key.HOME, Key.chord(Key.SHIFT, Key.END), keyInfo);
-                console.log("send key");
-                break;
+                if(!iframe){
+                    let element = await driver.findElement(By.xpath(msg.message.xpath));
+                    console.log("Find Element at handle: ", current_handle);
+                    // 使用正则表达式匹配 '<enter>'，不论大小写
+                    await element.sendKeys(Key.HOME, Key.chord(Key.SHIFT, Key.END), keyInfo);
+                    if(enter){
+                        await element.sendKeys(Key.ENTER);
+                    }
+                    console.log("send key");
+                    break;
+                } else {
+                    let iframes = await driver.findElements(By.tagName('iframe'));
+                    // 遍历所有的 iframe 并点击里面的元素
+                    for(let i = 0; i < iframes.length; i++) {
+                        let iframe = iframes[i];
+                        // 切换到 iframe
+                        await driver.switchTo().frame(iframe);
+                        // 在 iframe 中查找并点击元素
+                        let element;
+                        try {
+                            element = await driver.findElement(By.xpath(msg.message.xpath));
+                        } catch (error) {
+                            console.log('No such element found in the iframe');
+                        }
+                        if (element) {
+                            await element.sendKeys(Key.HOME, Key.chord(Key.SHIFT, Key.END), keyInfo);
+                            if(enter){
+                                await element.sendKeys(Key.ENTER);
+                            }
+                        }
+                        // 完成操作后切回主文档
+                        await driver.switchTo().defaultContent();
+                    }
+                    break;
+                }
+
             } catch (error) {
                 console.log("len", len);
                 len = len - 1;
@@ -158,82 +237,146 @@ async function beginInvoke(msg, ws) {
                     break;
                 }
             }
-            // .then(function (element) {
-            //     console.log("element", element, handles);
-            //     element.sendKeys(Key.HOME, Key.chord(Key.SHIFT, Key.END), keyInfo);
-            //         exit = true;
-            //     }, function (error) {
-            //         console.log("error", error);
-            //         len = len - 1;
-            //         if (len == 0) {
-            //             exit = true;
-            //         }
-            //     }
-            // );
         }
-        // let handles = driver.getAllWindowHandles();
-        // driver.switchTo().window(handles[handles.length - 1]);
-        // driver.findElement(By.xpath(msg.message.xpath)).sendKeys(Key.HOME, Key.chord(Key.SHIFT, Key.END), keyInfo);
-        // robot.keyTap("a", "control");
-        // robot.keyTap("backspace");
-        // robot.typeString(keyInfo);
-        // robot.keyTap("shift");
-        // robot.keyTap("shift");
     } else if (msg.type == 3) {
         try {
             if (msg.from == 0) {
                 socket_flowchart.send(msg.message.pipe); //直接把消息转接
                 let message = JSON.parse(msg.message.pipe);
                 let type = message.type;
-                // if(type.indexOf("Click")>=0){
-                //     await new Promise(resolve => setTimeout(resolve, 2000)); //等两秒
-                //
-                // }
+                console.log("FROM Browser: ", message);
+                console.log("Iframe:", message.iframe);
+                if(type.indexOf("Click")>=0){
+                    // 鼠标点击事件
+                    let iframe = message.iframe;
+                    let handles = await driver.getAllWindowHandles();
+                    console.log("handles", handles);
+                    let exit = false;
+                    let content_handle = handle_pairs[message.id];
+                    console.log(message.id,  content_handle);
+                    let order = [...handles.filter(handle => handle != current_handle && handle != content_handle), current_handle, content_handle]; //搜索顺序
+                    let len = order.length;
+                    while(true) {
+                        try{
+                            let h = order[len - 1];
+                            console.log("current_handle", current_handle);
+                            if(h != null && handles.includes(h)){
+                                await driver.switchTo().window(h); //执行失败会抛出异常
+                                current_handle = h;
+                                console.log("switch to handle: ", h);
+                            }
+                            //下面是找到窗口的情况下
+                            if(!iframe){
+                                let element = await driver.findElement(By.xpath(message.xpath));
+                                await element.click();
+                                break;
+                            } else {
+                                let iframes = await driver.findElements(By.tagName('iframe'));
+                                // 遍历所有的 iframe 并点击里面的元素
+                                for(let i = 0; i < iframes.length; i++) {
+                                    let iframe = iframes[i];
+                                    // 切换到 iframe
+                                    await driver.switchTo().frame(iframe);
+                                    // 在 iframe 中查找并点击元素
+                                    let element;
+                                    try {
+                                        element = await driver.findElement(By.xpath(message.xpath));
+                                    } catch (error) {
+                                        console.log('No such element found in the iframe');
+                                    }
+                                    if (element) {
+                                        await element.click();
+                                    }
+                                    // 完成操作后切回主文档
+                                    await driver.switchTo().defaultContent();
+                                }
+                                break;
+                            }
+                        } catch (error) {
+                            console.log("len", len); //如果没有找到元素，就切换到下一个窗口
+                            len = len - 1;
+                            if (len == 0) {
+                                break;
+                            }
+                        }
+                    }
+                }
             } else {
                 socket_window.send(msg.message.pipe);
+                for(let i in allWindowSockets){
+                    try{
+                        allWindowSockets[i].send(msg.message.pipe);
+                    } catch {
+                        console.log("Cannot send to socket with id: ", allWindowScoketNames[i]);
+                    }
+                }
+                console.log("FROM Flowchart: ", JSON.parse(msg.message.pipe));
             }
-        } catch {
-            dialog.showErrorBox("Error", "Please open the flowchart window first");
+        } catch (e) {
+            console.log(e);
         }
     } else if (msg.type == 5) {
-        var child = require('child_process').execFile;
+        let child = require('child_process').execFile;
         // 参数顺序： 1. task id 2. server address 3. saved_file_name 4. "remote" or "local" 5. user_data_folder
         // var parameters = [msg.message.id, server_address];
         let parameters = [];
         console.log(msg.message)
         if (msg.message.user_data_folder == null || msg.message.user_data_folder == undefined || msg.message.user_data_folder == "") {
-            parameters = ["--id", msg.message.id, "--server_address", server_address, "--user_data", 0];
+            parameters = ["--id", "[" + msg.message.id + "]", "--server_address", server_address, "--user_data", 0];
         } else {
             let user_data_folder_path = path.join(task_server.getDir(), msg.message.user_data_folder);
-            parameters = ["--id", msg.message.id, "--server_address", server_address, "--user_data", 1];
+            parameters = ["--id", "[" + msg.message.id + "]", "--server_address", server_address, "--user_data", 1];
             config.user_data_folder = msg.message.user_data_folder;
             config.absolute_user_data_folder = user_data_folder_path;
             fs.writeFileSync(path.join(task_server.getDir(), "config.json"), JSON.stringify(config));
         }
+        if(msg.message.mysql_config_path != "-1"){
+            config.mysql_config_path = msg.message.mysql_config_path;
+        }
+        fs.writeFileSync(path.join(task_server.getDir(), "config.json"), JSON.stringify(config));
         // child('Chrome/easyspider_executestage.exe', parameters, function(err,stdout, stderr) {
         //    console.log(stdout);
         // });
 
         let spawn = require("child_process").spawn;
-        if (process.platform != "darwin") {
+        if (process.platform != "darwin" && msg.message.execute_type == 1 && msg.message.id != -1) {
             let child_process = spawn(execute_path, parameters);
             child_process.stdout.on('data', function (data) {
                 console.log(data.toString());
             });
-        } else {
-            ws.send(task_server.getDir() + "/");
+        }
+        ws.send(JSON.stringify({"config_folder": task_server.getDir() + "/", "easyspider_location": task_server.getEasySpiderLocation()}));
+    } else if (msg.type == 6) {
+        try{
+            flowchart_window.openDevTools();
+        } catch {
+            console.log("open devtools error");
+        }
+        try{
+            invoke_window.openDevTools();
+        } catch {
+            console.log("open devtools error");
+        }
+    } else if (msg.type == 7) {
+        // 获得当前页面Cookies
+        try{
+            let cookies = await driver.manage().getCookies();
+            console.log("Cookies: ", cookies);
+            let cookiesText = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('\n');
+            socket_flowchart.send(JSON.stringify({"type": "GetCookies", "message": cookiesText}));
+        } catch {
+            console.log("Cannot get Cookies");
         }
     }
 }
 
 const WebSocket = require('ws');
-let socket_window = null;
-let socket_start = null;
-let socket_flowchart = null;
+const {all} = require("express/lib/application");
 let wss = new WebSocket.Server({port: websocket_port});
 wss.on('connection', function (ws) {
     ws.on('message', async function (message, isBinary) {
         let msg = JSON.parse(message.toString());
+        console.log("\n\nGET A MESSAGE: ", msg);
         // console.log(msg, msg.type, msg.message);
         if (msg.type == 0) {
             if (msg.message.id == 0) {
@@ -254,7 +397,10 @@ wss.on('connection', function (ws) {
                     console.log("New tab opened, change current_handle to: ", current_handle);
                 }
                 handle_pairs[msg.message.id] = current_handle;
-                console.log("Set handle_pair for id: ", msg.message.id, " to ", current_handle);
+                console.log("Set handle_pair for id: ", msg.message.id, " to ", current_handle, ", title is: ", msg.message.title);
+                socket_flowchart.send(JSON.stringify({"type": "title", "data": {"title":msg.message.title}}));
+                allWindowSockets.push(ws);
+                allWindowScoketNames.push(msg.message.id);
                 // console.log("handle_pairs: ", handle_pairs);
             }
         } else if (msg.type == 10) {
@@ -274,7 +420,7 @@ wss.on('connection', function (ws) {
 
 console.log(process.platform);
 
-async function runBrowser(lang = "en", user_data_folder = '') {
+async function runBrowser(lang = "en", user_data_folder = '', mobile = false) {
     const serviceBuilder = new ServiceBuilder(driverPath);
     let options = new chrome.Options();
     options.addArguments('--disable-blink-features=AutomationControlled');
@@ -284,6 +430,7 @@ async function runBrowser(lang = "en", user_data_folder = '') {
     } else if (lang == "zh") {
         options.addExtensions(path.join(__dirname, "EasySpider_zh.crx"));
     }
+    options.addExtensions(path.join(__dirname, "XPathHelper.crx"));
     options.setChromeBinaryPath(chromeBinaryPath);
     if (user_data_folder != "") {
         let dir = path.join(task_server.getDir(), user_data_folder);
@@ -292,6 +439,13 @@ async function runBrowser(lang = "en", user_data_folder = '') {
         config.user_data_folder = user_data_folder;
         fs.writeFileSync(path.join(task_server.getDir(), "config.json"), JSON.stringify(config));
     }
+    if (mobile) {
+        const mobileEmulation = {
+            deviceName: 'iPhone XR'
+        };
+        options.addArguments(`--user-agent="Mozilla/5.0 (iPhone; CPU iPhone OS 13_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1"`);
+        options.setMobileEmulation(mobileEmulation);
+    }
     driver = new Builder()
         .forBrowser('chrome')
         .setChromeOptions(options)
@@ -299,6 +453,7 @@ async function runBrowser(lang = "en", user_data_folder = '') {
         .build();
     await driver.manage().setTimeouts({implicit: 10000, pageLoad: 10000, script: 10000});
     await driver.executeScript("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})");
+    // await driver.executeScript("localStorage.clear();"); //重置参数数量
     const cdpConnection = await driver.createCDPConnection("page");
     let stealth_path = path.join(__dirname, "stealth.min.js");
     let stealth = fs.readFileSync(stealth_path, 'utf8');
@@ -306,7 +461,12 @@ async function runBrowser(lang = "en", user_data_folder = '') {
         source: stealth,
     });
     try {
-        await driver.get(server_address + "/taskGrid/taskList.html?wsport=" + websocket_port + "&backEndAddressServiceWrapper=" + server_address + "&lang=" + lang);
+        if(mobile){
+            await driver.get(server_address + "/taskGrid/taskList.html?wsport=" + websocket_port + "&backEndAddressServiceWrapper=" + server_address + "&mobile=1&lang=" + lang);
+        } else {
+            await driver.get(server_address + "/taskGrid/taskList.html?wsport=" + websocket_port + "&backEndAddressServiceWrapper=" + server_address + "&lang=" + lang);
+        }
+
         old_handles = await driver.getAllWindowHandles();
         current_handle = old_handles[old_handles.length - 1];
     } finally {
@@ -314,10 +474,10 @@ async function runBrowser(lang = "en", user_data_folder = '') {
     }
 }
 
-function handleOpenBrowser(event, lang = "en", user_data_folder = "") {
+function handleOpenBrowser(event, lang = "en", user_data_folder = "", mobile = false) {
     const webContents = event.sender;
     const win = BrowserWindow.fromWebContents(webContents);
-    runBrowser(lang, user_data_folder);
+    runBrowser(lang, user_data_folder, mobile);
     let size = screen.getPrimaryDisplay().workAreaSize;
     let width = parseInt(size.width);
     let height = parseInt(size.height * 0.6);
@@ -331,12 +491,12 @@ function handleOpenBrowser(event, lang = "en", user_data_folder = "") {
     let url = "";
     let id = -1;
     if (lang == "en") {
-        url = server_address + `/taskGrid/FlowChart.html?id=${id}&wsport=${websocket_port}&backEndAddressServiceWrapper=` + server_address;
+        url = server_address + `/taskGrid/FlowChart.html?id=${id}&wsport=${websocket_port}&backEndAddressServiceWrapper=` + server_address + "&mobile=" + mobile.toString();
     } else if (lang == "zh") {
-        url = server_address + `/taskGrid/FlowChart_CN.html?id=${id}&wsport=${websocket_port}&backEndAddressServiceWrapper=` + server_address;
+        url = server_address + `/taskGrid/FlowChart_CN.html?id=${id}&wsport=${websocket_port}&backEndAddressServiceWrapper=` + server_address+ "&mobile=" + mobile.toString();
     }
     // and load the index.html of the app.
-    flowchart_window.loadURL(url);
+    flowchart_window.loadURL(url, { extraHeaders: 'pragma: no-cache\n' });
     if(process.platform != "darwin"){
         flowchart_window.hide();
     }
@@ -347,7 +507,7 @@ function handleOpenBrowser(event, lang = "en", user_data_folder = "") {
 }
 
 function handleOpenInvoke(event, lang = "en") {
-    const window = new BrowserWindow({icon: iconPath});
+    invoke_window = new BrowserWindow({icon: iconPath});
     let url = "";
     language = lang;
     if (lang == "en") {
@@ -356,10 +516,10 @@ function handleOpenInvoke(event, lang = "en") {
         url = server_address + `/taskGrid/taskList.html?type=1&wsport=${websocket_port}&backEndAddressServiceWrapper=` + server_address + "&lang=zh";
     }
     // and load the index.html of the app.
-    window.loadURL(url);
-    window.maximize();
+    invoke_window.loadURL(url, { extraHeaders: 'pragma: no-cache\n' });
+    invoke_window.maximize();
     mainWindow.hide();
-    window.on('close', function (event) {
+    invoke_window.on('close', function (event) {
         mainWindow.show();
     });
 }
@@ -368,8 +528,16 @@ function handleOpenInvoke(event, lang = "en") {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+    session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+        details.requestHeaders['Accept-Language'] = 'zh'
+        callback({ cancel: false, requestHeaders: details.requestHeaders })
+    })
     ipcMain.on('start-design', handleOpenBrowser);
     ipcMain.on('start-invoke', handleOpenInvoke);
+    ipcMain.on('accept-agreement', function (event, arg) {
+        config.copyright = 1;
+        fs.writeFileSync(path.join(task_server.getDir(), "config.json"), JSON.stringify(config));
+    });
     createWindow();
 
     app.on('activate', function () {

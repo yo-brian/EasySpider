@@ -1,3 +1,4 @@
+EasySpider/
 node_modules/
 *.csv
 .idea/
@@ -10,3 +11,8 @@ Chrome/
 Data/
 tasks/
 Application/
+.history
+execution_instances/
+.DS_Store
+mysql_config.json
+EasySpider.app/

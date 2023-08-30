@@ -13,7 +13,7 @@
         table {
             table-layout: auto;
         }
-        
+
         table,
         td,
         th,
@@ -25,7 +25,7 @@
             max-width: 400px;
             min-width: 150px;
         }
-        
+
         .ID {
             width: 10%;
         }
@@ -35,7 +35,8 @@
 <body>
 
     <div class="row" style="margin-top: 40px;">
-        <div class="col-md-6" style="margin:0 auto" id="taskInfo" v-if="show">
+
+        <div class="col-md-7" style="margin:0 auto" id="taskInfo" v-if="show">
             <nav aria-label="breadcrumb">
                 <ol class="breadcrumb" style="padding-left:0;background-color: white">
                     <li class="breadcrumb-item" @click="gotoHome"><a href="#">{{"Home~首页" | lang}}</a></li>
@@ -45,61 +46,67 @@
             <h4 style="text-align: center;">{{"Task Information~任务信息" | lang}}</h4>
             <p>{{"Task Name:~任务名称：" | lang}} {{task["name"]}}</p>
             <p style="word-wrap: break-word;word-break: break-all;overflow: hidden;max-height: 100px;">{{"Task Description:~任务描述：" | lang}} {{task["desc"]}}</p>
-            <p style="word-wrap: break-word;word-break: break-all;overflow: hidden;max-height: 100px;">{{"Example URL:~样例URL：" | lang}} {{task["url"]}}</p>
+            <p style="word-wrap: break-word;word-break: break-all;overflow: hidden;max-height: 100px;">{{"Example URL:~样例网址：" | lang}} {{task["url"]}}</p>
+            <p style="word-wrap: break-word;word-break: break-all;overflow: hidden;max-height: 100px;">{{"Create Time:~创建时间：" | lang}} {{dateFormat(task["create_time"])}}</p>
+            <p style="word-wrap: break-word;word-break: break-all;overflow: hidden;max-height: 100px;">{{"Update Time:~更新时间：" | lang}} {{dateFormat(task["update_time"])}}</p>
+            <p>{{"Operations (Please close this window and select 'Design Task' button if you want to modify task with a browser)~操作（如要带浏览器修改任务流程请关闭此窗口并选择设计任务）" | lang}}</p>
             <p><a style="margin-top: 5px;" href="javascript:void(0)" v-on:click="modifyTask(task['id'],task['url'])" class="btn btn-primary">{{"Modify Task Workflow~修改任务流程" | lang}}</a>
-            <a style="margin-top: 5px;" href="javascript:void(0)" v-on:click="invokeTask(task['id'],task['url'])" class="btn btn-primary">{{"Invoke Task~调用任务" | lang}}</a></p>
-            <p>{{"Input Parameters:~输入参数：" | lang}}</p>
+                <a style="margin-top: 5px;" href="javascript:void(0)" v-on:click="invokeTask(task['id'],task['url'])" class="btn btn-primary">{{"Invoke Task~调用任务" | lang}}</a></p>
+            <p>{{"Input Parameters~输入参数" | lang}}</p>
             <table class="table table-bordered">
                 <tbody>
                     <tr>
-                        <th style="min-width: 50px;">ID</th>
-                        <th>{{"Parameter Name~参数名称" | lang}}</th>
-                        <th>{{"Invoke Name~调用名" | lang}}</th>
-                        <th>{{"Parameter Type~参数类型" | lang}}</th>
+                        <th style="min-width: 50px; text-align: center">ID</th>
+                        <th style="text-align: center">{{"Parameter Name~参数名称" | lang}}</th>
+                        <th style="text-align: center">{{"Invoke Name~调用名称" | lang}}</th>
+                        <th style="text-align: center">{{"Parameter Type~参数类型" | lang}}</th>
                         <th>{{"Example Value~示例值" | lang}}</th>
                         <th>{{"Parameter Description~参数描述" | lang}}</th>
                     </tr>
                     <tr v-if="task.inputParameters.length>0" v-for="i in task.inputParameters.length">
-                        <td style="min-width: 50px;">{{i}}</td>
-                        <td>{{task.inputParameters[i-1]["nodeName"]}}</td>
-                        <td>{{task.inputParameters[i-1]["name"]}}</td>
-                        <td>{{task.inputParameters[i-1]["type"]}}</td>
+                        <td style="min-width: 50px; text-align: center">{{i}}</td>
+                        <td style="text-align: center">{{task.inputParameters[i-1]["nodeName"]}}</td>
+                        <td style="text-align: center">{{task.inputParameters[i-1]["name"]}}</td>
+                        <td style="text-align: center">{{task.inputParameters[i-1]["type"]}}</td>
                         <td>{{task.inputParameters[i-1]["exampleValue"]}}</td>
                         <td>{{task.inputParameters[i-1]["desc"]}}</td>
                     </tr>
                     <tr v-if="task.inputParameters.length==0">
-                        <td>{{"Empty~无" | lang}}</td>
-                        <td>{{"Empty~无" | lang}}</td>
-                        <td>{{"Empty~无" | lang}}</td>
-                        <td>{{"Empty~无" | lang}}</td>
-                        <td>{{"Empty~无" | lang}}</td>
-                        <td>{{"Empty~无" | lang}}</td>
+                        <td style="text-align: center">{{"Empty~无" | lang}}</td>
+                        <td style="text-align: center">{{"Empty~无" | lang}}</td>
+                        <td style="text-align: center">{{"Empty~无" | lang}}</td>
+                        <td style="text-align: center">{{"Empty~无" | lang}}</td>
+                        <td style="text-align: center">{{"Empty~无" | lang}}</td>
+                        <td style="text-align: center">{{"Empty~无" | lang}}</td>
                     </tr>
                 </tbody>
             </table>
-            <p>{{"Output Parameters:~输出参数：" | lang}}</p>
+            <p>{{"Output Parameters~输出参数" | lang}}</p>
             <table class="table table-bordered">
                 <tbody>
                     <tr>
-                        <th style="min-width: 50px;">ID</th>
-                        <th>{{"Parameter Name~参数名称" | lang}}</th>
-                        <th>{{"Parameter Type~参数类型" | lang}}</th>
+                        <th style="min-width: 50px; text-align: center">ID</th>
+                        <th style="text-align: center">{{"Parameter Name~参数名称" | lang}}</th>
+                        <th style="text-align: center">{{"Parameter Type~参数类型" | lang}}</th>
                         <th>{{"Example Value~示例值" | lang}}</th>
                         <th>{{"Parameter Description~参数描述" | lang}}</th>
+                        <th style="text-align: center">{{"Record as a field~作为字段保存" | lang}}</th>
                     </tr>
                     <tr v-if="task.outputParameters.length>0" v-for="i in task.outputParameters.length">
-                        <td style="min-width: 50px;">{{i}}</td>
-                        <td>{{task.outputParameters[i-1]["name"]}}</td>
-                        <td>{{task.outputParameters[i-1]["type"]}}</td>
+                        <td style="min-width: 50px; text-align: center">{{i}}</td>
+                        <td style="text-align: center">{{task.outputParameters[i-1]["name"]}}</td>
+                        <td style="text-align: center">{{task.outputParameters[i-1]["type"]}}</td>
                         <td>{{task.outputParameters[i-1]["exampleValue"]}}</td>
                         <td>{{task.outputParameters[i-1]["desc"]}}</td>
+                        <td style="text-align: center">{{task.outputParameters[i-1]["recordASField"] == 1? "Yes~是": "No~否" | lang}}</td>
                     </tr>
                     <tr v-if="task.outputParameters.length==0">
-                        <td style="min-width: 50px;">{{"Empty~无" | lang}}</td>
-                        <td>{{"Empty~无" | lang}}</td>
-                        <td>{{"Empty~无" | lang}}</td>
-                        <td>{{"Empty~无" | lang}}</td>
-                        <td>{{"Empty~无" | lang}}</td>
+                        <td style="min-width: 50px;text-align: center">{{"Empty~无" | lang}}</td>
+                        <td style="text-align: center">{{"Empty~无" | lang}}</td>
+                        <td style="text-align: center">{{"Empty~无" | lang}}</td>
+                        <td style="text-align: center">{{"Empty~无" | lang}}</td>
+                        <td style="text-align: center">{{"Empty~无" | lang}}</td>
+                        <td style="text-align: center">{{"Empty~无" | lang}}</td>
                     </tr>
                 </tbody>
             </table>
@@ -120,6 +127,7 @@
             backEndAddressServiceWrapper: getUrlParam("backEndAddressServiceWrapper"),
         },
         methods: {
+            dateFormat: DateFormat,
             gotoHome:function(){
               let url = "";
               if(getUrlParam("lang")=="zh"){
@@ -154,4 +162,5 @@
         app.$data.task = result;
         app.$data.show = true;
     });
+
 </script>

@@ -4,6 +4,12 @@ const url = require('url');
 const fs = require('fs');
 const path=require('path');
 const {app, dialog} = require('electron');
+const XLSX = require('xlsx');
+const formidable = require('formidable');
+const express = require('express');
+const multer  = require('multer');
+const cors = require('cors');
+
 function travel(dir,callback){
     fs.readdirSync(dir).forEach((file)=>{
         const pathname=path.join(dir,file)
@@ -16,8 +22,8 @@ function travel(dir,callback){
 }
 function compare(p){ //这是比较函数
     return function(m,n){
-        var a = m[p];
-        var b = n[p];
+        let a = m[p];
+        let b = n[p];
         return b - a; //降序
     }
 }
@@ -29,7 +35,18 @@ function getDir(){
         } else {
             return path.join(__dirname,"../../..");
         }
-    } else{
+    } else {
+        return __dirname;
+    }
+}
+function getEasySpiderLocation(){
+    if(__dirname.indexOf("app") >= 0 && __dirname.indexOf("sources") >= 0){
+        if(process.platform == "darwin"){
+            return path.join(__dirname,"../../../");
+        } else {
+            return path.join(__dirname,"../../../");
+        }
+    } else {
         return __dirname;
     }
 }
@@ -40,18 +57,81 @@ if(!fs.existsSync(path.join(getDir(), "execution_instances"))){
     fs.mkdirSync(path.join(getDir(), "execution_instances"));
 }
 if(!fs.existsSync(path.join(getDir(), "config.json"))){
-    fs.writeFileSync(path.join(getDir(), "config.json"), JSON.stringify({"webserver_address":"http://localhost","webserver_port":8074,"user_data_folder":"./user_data","absolute_user_data_folder":""}));
+    // Generate config.json
+    fs.writeFileSync(path.join(getDir(), "config.json"),
+        JSON.stringify({
+                "webserver_address": "http://localhost",
+                "webserver_port": 8074,
+                "user_data_folder": "./user_data",
+                "debug": false,
+                "copyright": 0,
+                "sys_arch": require('os').arch(),
+                "mysql_config_path": "./mysql_config.json",
+                "absolute_user_data_folder": "D:\\Document\\Projects\\EasySpider\\ElectronJS\\user_data"
+            }
+        ));
 }
 
 exports.getDir = getDir;
+exports.getEasySpiderLocation = getEasySpiderLocation;
 FileMimes = JSON.parse(fs.readFileSync(path.join(__dirname,'mime.json')).toString());
+
+const fileServer = express();
+const upload = multer({ dest: path.join(getDir(), 'Data/') });
+
+fileServer.use(cors());
+fileServer.post('/excelUpload', upload.single('file'), (req, res) => {
+    let workbook = XLSX.readFile(req.file.path);
+    let sheet_name_list = workbook.SheetNames;
+    let data = XLSX.utils.sheet_to_json(workbook.Sheets[sheet_name_list[0]]);
+    let result = data.reduce((acc, obj) => {
+        Object.keys(obj).forEach(key => {
+            if(!acc[key]) {
+                acc[key] = [];
+            }
+            acc[key].push(obj[key]);
+        });
+        return acc;
+    }, {});
+    // console.log(data);
+    // delete file after reading
+    fs.unlink(req.file.path, (err) => {
+        if (err) {
+            console.error(err);
+            return;
+        }
+        // file removed
+    });
+    res.send(JSON.stringify(result));
+});
+
+fileServer.listen(8075, () => {
+    console.log('Server listening on http://localhost:8075');
+});
+
+
 exports.start = function(port = 8074) {
     http.createServer(function(req, res) {
         let body = "";
         res.setHeader("Access-Control-Allow-Origin", "*"); // 设置可访问的源
         // 解析参数
         const pathName = url.parse(req.url).pathname;
-        if(pathName.indexOf(".") < 0) { //如果没有后缀名, 则为后台请求
+        if(pathName == "/excelUpload" && req.method.toLowerCase() === 'post'){
+            // // parse a file upload
+            // let form = new formidable.IncomingForm();
+            // // Set the max file size
+            // form.maxFileSize = 200 * 1024 * 1024; // 200MB
+            // form.parse(req, function (err, fields, files) {
+            //     console.log("excelUpload")
+            //     console.log(err, fields, files);
+            //     let oldpath = files.file.path;
+            //     let workbook = XLSX.readFile(oldpath);
+            //     let sheet_name_list = workbook.SheetNames;
+            //     let data = XLSX.utils.sheet_to_json(workbook.Sheets[sheet_name_list[0]]);
+            //     console.log(data);
+            //     res.end('File uploaded and read successfully.');
+            // });
+        } else if(pathName.indexOf(".") < 0) { //如果没有后缀名, 则为后台请求
             res.writeHead(200, { 'Content-Type': 'application/json' });
         }
         // else if(pathName.indexOf("index.html") >= 0) {
@@ -116,6 +196,9 @@ exports.start = function(port = 8074) {
                 output.sort(compare("mtime"));
                 res.write(JSON.stringify(output));
                 res.end();
+            } else if(pathName == "/queryOSVersion") {
+                res.write(JSON.stringify({"version":process.platform, "bit":process.arch}));
+                res.end();
             } else if (pathName == "/queryExecutionInstances") { //查询所有服务信息，只包括id和服务名称
                 output = [];
                 travel(path.join(getDir(), "execution_instances"),function(pathname){
@@ -134,9 +217,9 @@ exports.start = function(port = 8074) {
                 res.write(JSON.stringify(output));
                 res.end();
             } else if (pathName == "/queryTask") {
-                var params = url.parse(req.url, true).query;
+                let params = url.parse(req.url, true).query;
                 try {
-                    var tid = parseInt(params.id);
+                    let tid = parseInt(params.id);
                     const data = fs.readFileSync(path.join(getDir(), `tasks/${tid}.json`), 'utf8');
                     // parse JSON string to JSON object
                     res.write(data);
@@ -146,9 +229,9 @@ exports.start = function(port = 8074) {
                     res.end();
                 }
             } else if (pathName == "/queryExecutionInstance") {
-                var params = url.parse(req.url, true).query;
+                let params = url.parse(req.url, true).query;
                 try {
-                    var tid = parseInt(params.id);
+                    let tid = parseInt(params.id);
                     const data = fs.readFileSync(path.join(getDir(), `execution_instances/${tid}.json`), 'utf8');
                     // parse JSON string to JSON object
                     res.write(data);
@@ -161,7 +244,7 @@ exports.start = function(port = 8074) {
                 res.write("Hello World!", 'utf8');
                 res.end();
             } else if(pathName == "/deleteTask"){
-                var params = url.parse(req.url, true).query;
+                let params = url.parse(req.url, true).query;
                 try {
                     let tid = parseInt(params.id);
                     let data = fs.readFileSync(path.join(getDir(), `tasks/${tid}.json`), 'utf8');
@@ -203,9 +286,33 @@ exports.start = function(port = 8074) {
                     data["id"] = id;
                     // write JSON string to a fil
                 }
+                if(data["outputFormat"] == "mysql"){
+                    let mysql_config_path = path.join(getDir(), 'mysql_config.json');
+                    // 检测文件是否存在
+                    fs.access(mysql_config_path, fs.F_OK, (err) => {
+                        if (err) {
+                            console.log("File does not exist. Creating...");
+                            // 文件不存在，创建文件
+                            const config = {
+                                host: "localhost",
+                                port: 3306,
+                                username: "your_username",
+                                password: "your_password",
+                                database: "your_database"
+                            };
+                            fs.writeFile(mysql_config_path, JSON.stringify(config, null, 4), (err) => {
+                                if (err) throw err;
+                                console.log('File is created successfully.');
+                            });
+                        } else {
+                            console.log("File exists.");
+                        }
+                    });
+                }
                 data = JSON.stringify(data);
                 // write JSON string to a file
                 fs.writeFile(path.join(getDir(), `tasks/${id}.json`), data, (err) => {});
+
                 res.write(id.toString(), 'utf8');
                 res.end();
             } else if(pathName == "/invokeTask"){

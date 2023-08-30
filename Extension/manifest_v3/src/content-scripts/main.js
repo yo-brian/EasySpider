@@ -2,11 +2,13 @@ import $ from "jquery";
 import Vue from "vue";
 import {global, getOS, readXPath, addEl, clearEl, clearReady, handleElement, clearParameters, generateParameters, generateMultiParameters, handleDescendents, generateValTable, findRelated, pushToReadyList, readyToList, combineXpath, relatedTest} from "./global.js";
 import ToolKit from "./toolkit.vue";
+import iframe from "./iframe.vue";
 
 
 //表现逻辑层的处理
 
 if (window.location.href.indexOf("backEndAddressServiceWrapper") >= 0) {
+    chrome.storage.local.set({ "parameterNum": 1 }); //重置参数索引值
     throw "serviceGrid"; //如果是服务器网页页面，则不执行工具
 }
 
@@ -30,14 +32,19 @@ global.tdiv.style.width = "3000px";
 global.tdiv.style.height = "3000px";
 global.tdiv.style.pointerEvents = "none";
 
-var mousemovebind = false; //如果出现元素默认绑定了mousemove事件导致匹配不到元素的时候，开启第二种模式获得元素
+let mousemovebind = false; //如果出现元素默认绑定了mousemove事件导致匹配不到元素的时候，开启第二种模式获得元素
 
-var toolkit = document.createElement("div")
-// @ts-ignore
+let toolkit = document.createElement("div");
 toolkit.classList = "tooltips"; //添加样式
+// @ts-ignore
+// if(isInIframe()){
+//     toolkit.setAttribute("id", "wrapperToolkitIframe");
+// } else {
 toolkit.setAttribute("id", "wrapperToolkit");
+// }
 
-var tooltips = false; //标记鼠标是否在提示框上
+
+let tooltips = false; //标记鼠标是否在提示框上
 
 //右键菜单屏蔽
 document.oncontextmenu = () => false;
@@ -47,12 +54,12 @@ document.addEventListener("mousemove", function() {
     }
 
     //如果鼠标在元素框内则点击和选中失效
-    var x = event.clientX;
-    var y = event.clientY;
-    var divx1 = toolkit.offsetLeft;
-    var divy1 = toolkit.offsetTop;
-    var divx2 = toolkit.offsetLeft + toolkit.offsetWidth;
-    var divy2 = toolkit.offsetTop + toolkit.offsetHeight;
+    let x = event.clientX;
+    let y = event.clientY;
+    let divx1 = toolkit.offsetLeft;
+    let divy1 = toolkit.offsetTop;
+    let divx2 = toolkit.offsetLeft + toolkit.offsetWidth;
+    let divy2 = toolkit.offsetTop + toolkit.offsetHeight;
     if (x >= divx1 && x <= divx2 && y >= divy1 && y <= divy2) {
         tooltips = true;
         return;
@@ -102,8 +109,9 @@ document.addEventListener("mousemove", function() {
         } else {
             try {
                 global.oe.style.backgroundColor = global.defaultbgColor; //设置新元素的背景元素
-            } catch {}
+            } catch {
 
+            }
         }
         global.xnode = global.oe;
         global.div.style.display = "none";
@@ -114,15 +122,31 @@ document.addEventListener("mousemove", function() {
 
 });
 
-window.addEventListener("beforeunload", function(event) {
-    event.preventDefault();
-    let message = {
-        type: 10,
-        message: {
-            id: global.id, //socket id
-        }
-    };
-    global.ws.send(JSON.stringify(message));
+// window.addEventListener("beforeunload", function(event) {
+//     event.preventDefault();
+//     let message = {
+//         type: 10,
+//         message: {
+//             id: global.id, //socket id
+//         }
+//     };
+//     global.ws.send(JSON.stringify(message));
+//     // Remove the confirmation message
+//     event.returnValue = '';
+// });
+
+window.addEventListener('DOMContentLoaded', () => {
+    // Remove any existing beforeunload events
+    window.onbeforeunload = null;
+
+    // Override the beforeunload event with a custom function
+    window.addEventListener('beforeunload', (event) => {
+        // Prevent the event's default action
+        event.preventDefault();
+
+        // Remove the confirmation message
+        event.returnValue = '';
+    });
 });
 
 //点击没反应时候的替代方案
@@ -150,7 +174,8 @@ toolkit.addEventListener("mousedown", function(e) { e.stopPropagation(); }); //�
 document.body.append(global.div); //默认如果toolkit不存在则div和tdiv也不存在
 document.body.append(global.tdiv);
 document.body.append(toolkit);
-var timer;
+let timer;
+
 
 
 //生成Toolkit
@@ -158,7 +183,12 @@ function generateToolkit() {
     $(".tooltips").html(`
     <div id="realcontent"></div>
 `);
+    // if(isInIframe()){
+    //     global.app = new Vue(iframe);
+    // } else{
     global.app = new Vue(ToolKit);
+    // }
+
     let h = $(".tooldrag").height();
     let difference = 26 - h; //获得高度值差
     if (difference > 0) {
@@ -199,8 +229,65 @@ function generateToolkit() {
             $(document).off('mousemove');
         });
     });
+    // 拖拽右下角改变大小
+    const wrapperToolkit = document.getElementById('wrapperToolkit');
+    const EasySpiderResizer = document.getElementById('EasySpiderResizer');
+
+    let mousedown = false;
+    let startX, startY, startWidth, startHeight;
+
+
+    EasySpiderResizer.addEventListener('mousedown', e => {
+        mousedown = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        startWidth = wrapperToolkit.offsetWidth;
+        startHeight = wrapperToolkit.offsetHeight;
+        e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', e => {
+        // if the mouse is not pressed, do nothing
+        if (!mousedown) return;
+        let newX = e.clientX;
+        let newY = e.clientY;
+
+        // Update the width: Original width - (current mouse X position - original mouse X position)
+        let newWidth = startWidth - (newX - startX);
+
+        // Update the height: Original height - (current mouse Y position - original mouse Y position)
+        let newHeight = startHeight - (newY - startY);
+
+        // Set the new width, height and left, top of the wrapperToolkit
+
+
+
+        // wrapperToolkit.style.left = `${newX}px`;
+        // wrapperToolkit.style.top = `${newY}px`;
+
+        if (newWidth > 300 && newWidth < 1200) {
+            wrapperToolkit.style.width = `${newWidth}px`;
+            // set the new width of the wrapperToolkit
+        }
+        if (newHeight > 420 && newHeight < 800) {
+            wrapperToolkit.style.height = `${newHeight}px`;
+            // console.log(newHeight)
+            try{
+                let toolkitcontain = document.getElementsByClassName('toolkitcontain')[0];
+                toolkitcontain.style.height = `${newHeight-330}px`;
+            } catch(e){
+
+            }
+            // set the new width of the wrapperToolkit
+        }
+    });
+
+    window.addEventListener('mouseup', e => {
+        // when the mouse is released, stop resizing
+        mousedown = false;
+    });
     timer = setInterval(function() { //时刻监测相应元素是否存在(防止出现如百度一样元素消失重写body的情况)，如果不存在，添加进来
-        if (document.body != null && document.getElementById("wrapperToolkit") == null) {
+        if (document.body != null && document.getElementsByClassName("tooltips").length == 0) {
             this.clearInterval(); //先取消原来的计时器，再设置新的计时器
             document.body.append(global.div); //默认如果toolkit不存在则div和tdiv也不存在
             document.body.append(global.tdiv);
@@ -212,3 +299,7 @@ function generateToolkit() {
 //Vue元素
 generateToolkit();
 
+let closeButton = document.getElementById("closeButton");
+closeButton.addEventListener("click", function() {
+    toolkit.style.display = "none"; // 隐藏元素
+});

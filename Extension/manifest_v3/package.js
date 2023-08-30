@@ -1,4 +1,4 @@
-import fs from 'fs';
+import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import readline from 'readline';
@@ -11,7 +11,12 @@ let config = fs.readFileSync(path.join(__dirname, `src/content-scripts/config.js
 config = JSON.parse(config);
 
 // 生成英文插件
-removeDir(path.join(__dirname, `EasySpider_en`));
+try{
+    removeDir(path.join(__dirname, `EasySpider_en`));
+} catch (e) {
+
+}
+
 config.language = "en";
 let data = JSON.stringify(config);
 // write JSON string to a file
@@ -44,10 +49,14 @@ execSync(`npm run crx EasySpider_en`, (error, stdout, stderr) => {
     console.log(`stdout: ${stdout}`);
 });
 fs.copyFileSync(path.join(__dirname, './EasySpider_en.crx'), path.join(__dirname, '../../ElectronJS/EasySpider_en.crx'));
-
-
+copyFolderSync(path.join(__dirname, './EasySpider_en'), path.join(__dirname, '../../ElectronJS/EasySpider_en'));
 // 生成中文插件
-removeDir(path.join(__dirname, `EasySpider_zh`));
+try{
+    removeDir(path.join(__dirname, `EasySpider_zh`));
+} catch (e) {
+
+}
+
 config.language = "zh";
 data = JSON.stringify(config);
 // write JSON string to a file
@@ -80,7 +89,7 @@ execSync(`npm run crx EasySpider_zh`, (error, stdout, stderr) => {
     console.log(`stdout: ${stdout}`);
 });
 fs.copyFileSync(path.join(__dirname, './EasySpider_zh.crx'), path.join(__dirname, '../../ElectronJS/EasySpider_zh.crx'));
-
+copyFolderSync(path.join(__dirname, './EasySpider_zh'), path.join(__dirname, '../../ElectronJS/EasySpider_zh'));
 
 function removeDir(dir) {
     let files = fs.readdirSync(dir)
@@ -98,3 +107,17 @@ function removeDir(dir) {
     fs.rmdirSync(dir)//如果文件夹是空的，就将自己删除掉
 }
 
+function copyFolderSync(source, target) {
+    try {
+        // 如果目标文件夹已存在，则先删除
+        if (fs.existsSync(target)) {
+            fs.removeSync(target);
+        }
+
+        // 复制文件夹
+        fs.copySync(source, target);
+        console.log('文件夹复制完成！');
+    } catch (err) {
+        console.error('复制文件夹时出错:', err);
+    }
+}
